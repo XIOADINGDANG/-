@@ -41,9 +41,22 @@ RSD_COL_SUFFIX = "_RSD"
 # ================================================
 
 # ---------------------- 数据清洗相关正则规则 ----------------------
-special_chars_for_delete = r'[\{\}\[\]\?\!αβγδεζηθικλμνξοπρστυφχψω]'
-text_strings_for_delete = r'Similar to|NP-'
-delete_row_pattern = re.compile(f'({special_chars_for_delete})|({text_strings_for_delete})')
+# 需从化合物名称中移除的符号（仅清理，不删行）
+chars_to_remove_from_name = r'[\?!αβγδεζηθικλμνξοπρστυφχψω]'
+remove_chars_pattern = re.compile(chars_to_remove_from_name)
+
+# 需删除整行的文本（NP- 或 #NAME?）
+delete_row_texts = r'NP-|#NAME\?'
+delete_row_pattern = re.compile(delete_row_texts)
+
+# ---------------------- 清理化合物名称函数（新增） ----------------------
+def clean_compound_name(name: str) -> str:
+    """移除化合物名称中的指定符号，保留其他内容"""
+    if pd.isna(name):
+        return name
+    # 移除目标符号
+    cleaned_name = remove_chars_pattern.sub('', str(name))
+    return cleaned_name
 
 # ---------------------- 合并重复行函数 ----------------------
 def merge_duplicate_rows(df: pd.DataFrame, group_col: str, conc_prefix: str) -> pd.DataFrame:
@@ -177,7 +190,12 @@ def main():
             group_col = 'A'
         print(f"使用 '{group_col}' 列作为化合物名称列")
         
-        print("\n===== 2. 执行删除不合格行 =====")
+        print("\n===== 2. 清理化合物名称（移除指定符号） =====")
+        # 清理化合物名称中的?!和希腊字母（保留行）
+        df_original[group_col] = df_original[group_col].apply(clean_compound_name)
+        print(f"已完成{group_col}列的符号清理（移除?!αβγδεζηθικλμνξοπρστυφχψω）")
+        
+        print("\n===== 3. 执行删除不合格行（NP- / #NAME?） =====")
         def is_row_to_delete(row):
             for val in row.astype(str):
                 if delete_row_pattern.search(val):
@@ -191,7 +209,7 @@ def main():
             print(f"\n=== 被删除的行示例（前5行）===")
             deleted_sample = df_original[rows_to_delete][group_col].head(5)
             for idx, val in deleted_sample.items():
-                print(f"删除原因：包含删行规则字符 → 化合物名称：{val}")
+                print(f"删除原因：包含NP-/#NAME? → 化合物名称：{val}")
         
         df_after_delete = df_original[~rows_to_delete].reset_index(drop=True)
         retained_rows_count = len(df_after_delete)
@@ -202,7 +220,7 @@ def main():
             print("警告：删除后无保留数据，终止后续操作")
             return
         
-        print("\n===== 3. 合并重复化合物数据 =====")
+        print("\n===== 4. 合并重复化合物数据 =====")
         duplicate_rows_count = df_after_delete.duplicated(subset=[group_col]).sum()
         print(f"合并前重复行数（基于{group_col}列）：{duplicate_rows_count}")
         
@@ -212,11 +230,12 @@ def main():
         
         print("\n========== 数据清洗统计 ==========")
         print(f"1. 原数据总行数：{original_rows}")
-        print(f"2. 删行规则删除行数：{deleted_rows_count}")
-        print(f"3. 删行后保留行数：{retained_rows_count}")
-        print(f"4. 合并前重复行数：{duplicate_rows_count}")
-        print(f"5. 合并后最终行数：{cleaned_rows}")
-        print(f"6. 识别到的浓度列数量：{len([col for col in df_cleaned.columns if col.startswith(CONCENTRATION_COL_PREFIX)])}")
+        print(f"2. 清理化合物名称后行数：{original_rows}（仅清理符号，未删行）")
+        print(f"3. 删行规则删除行数（NP-/#NAME?）：{deleted_rows_count}")
+        print(f"4. 删行后保留行数：{retained_rows_count}")
+        print(f"5. 合并前重复行数：{duplicate_rows_count}")
+        print(f"6. 合并后最终行数：{cleaned_rows}")
+        print(f"7. 识别到的浓度列数量：{len([col for col in df_cleaned.columns if col.startswith(CONCENTRATION_COL_PREFIX)])}")
         print("======================================")
         
         # ============== 第二步：补齐空白列并计算RSD ==============
